@@ -1,0 +1,52 @@
+---
+title: "Visualising gene ontology results"
+author: "Aine Fairbrother-Browne & Regina Reynolds"
+date: "12/19"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    highlight: kate
+    theme: paper
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+---
+
+## Running gProfiler2
+
+```{r setup, include=FALSE}
+
+# importing the gprofiler library
+library(gprofiler2) 
+
+# import PD GWAS gene list
+backgroundList = c()
+
+# import background set
+geneList = c()
+
+# running gprofiler
+gprofilerOutput = gprofiler2::gost(geneList, 
+                               organism = "hsapiens", # set the organism 
+                               correction_method = c("gSCS"), # select a correction method (gSCS reccomended in gost documentation)
+                               domain_scope = c("custom"), # select whether to restrict the background set
+                               custom_bg = backgroundList, # add background set
+                               sources = c("GO"), # databases would you like to search for pathways & processes (others: "KEGG","REAC","WP")
+                               significant=TRUE, # when TRUE displays only significant results (p<0.05)
+                               evcodes=FALSE, # when TRUE displays the IDs of the genes calling each pathway
+                               ordered_query=TRUE)[[1]] # when TRUE the input list is ordered in some meaningful way
+
+```
+
+## Visualising the results as a barplot  
+
+```{r}
+
+source("~/R/gen_gprofiler_barplot.R")
+
+gen_gprofiler_barplot(DF=gprofilerOutput, num_categories=10, plot_title="")
+
+```
+
+

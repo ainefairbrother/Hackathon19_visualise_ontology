@@ -13,40 +13,116 @@ output:
     toc_float: yes
 ---
 
-## Running gProfiler2
-
 ```{r setup, include=FALSE}
 
-# importing the gprofiler library
-library(gprofiler2) 
-
-# import PD GWAS gene list
-backgroundList = c()
-
-# import background set
-geneList = c()
-
-# running gprofiler
-gprofilerOutput = gprofiler2::gost(geneList, 
-                               organism = "hsapiens", # set the organism 
-                               correction_method = c("gSCS"), # select a correction method (gSCS reccomended in gost documentation)
-                               domain_scope = c("custom"), # select whether to restrict the background set
-                               custom_bg = backgroundList, # add background set
-                               sources = c("GO"), # databases would you like to search for pathways & processes (others: "KEGG","REAC","WP")
-                               significant=TRUE, # when TRUE displays only significant results (p<0.05)
-                               evcodes=FALSE, # when TRUE displays the IDs of the genes calling each pathway
-                               ordered_query=TRUE)[[1]] # when TRUE the input list is ordered in some meaningful way
+knitr::opts_chunk$set(echo = T, warning = F, message= F)
 
 ```
 
-## Visualising the results as a barplot  
+# Loading necessary libraries
 
 ```{r}
 
-source("~/R/gen_gprofiler_barplot.R")
-
-gen_gprofiler_barplot(DF=gprofilerOutput, num_categories=10, plot_title="")
+library(gprofiler2)
+library(tidyverse)
+library(readxl)
 
 ```
 
+# Check your working directory
+- Paths provided within this .rmd assume you are working within the `Hackathon19_visualise_ontology` project directory. Provided you have opened `Hackathon19_visualise_ontology` as a project this should already be the case.
+- You can check by doing the following:
+
+```{r}
+
+getwd()
+
+```
+
+# Running gProfiler2
+- Input genes are sourced from the latest [PD GWAS](https://www.biorxiv.org/content/10.1101/388165v3).
+```{r}
+
+# import PD GWAS gene list
+geneList <- 
+  readxl::read_excel(path = "./data/TableS2_Detailed_summary_statistics_nominated_risk_variants.xlsx") %>% 
+  # Extract "Nearest Gene" column as vector
+  .[["Nearest Gene"]] %>% 
+  # Remove NAs
+  na.omit() %>%
+  # Convert to character vector
+  as.character() %>% 
+  # Keep only unique genes
+  unique()
+
+# running gprofiler
+gprofilerOutput <- gprofiler2::gost(geneList, 
+                               organism = "hsapiens", # set the organism 
+                               correction_method = c("gSCS"), # select a correction method (gSCS reccomended in gost documentation)
+                               domain_scope = c("annotated"), # select whether to restrict the background set
+                               sources = c("GO"), # databases would you like to search for pathways & processes (others: "KEGG","REAC","WP")
+                               significant = TRUE, # when TRUE displays only significant results (p<0.05)
+                               evcodes = FALSE, # when TRUE displays the IDs of the genes calling each pathway
+                               ordered_query = FALSE) # when TRUE the input list is ordered in some meaningful way
+
+```
+
+- The background list (`domain_scope` argument) is an important choice, as it should represent the population of genes your list was sampled from. E.g. If you were to perform a differential gene expression experiment in brain samples from control and PD, your background list would be all the expressed genes you tested.
+    - `gprofiler2::gost` provides 3 different options: "annotated", "known", "custom". For more details see: https://biit.cs.ut.ee/gprofiler/page/docs#statistical_domain_scope
+    
+# What do the results mean?
+```{r}
+
+gprofilerOutput$result %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(scrollX = TRUE),
+                class = 'white-space: nowrap')
+  
+
+```
+
+- gprofiler outputs a number of columns, a few of which are not entirely self-explanatory, including:
+    - precision: this is the proportion of genes in the input gene list that can be assigned this term i.e. overlap.size/query.size
+    - recall: this is the proportion of genes in the input list that overlap with the term i.e. overlap.size/term.size
+    - parents: GO terms belong to families of terms. This column will provide the parent terms to the GO term found enriched.
+
+# How to visualise this information?
+- There are many ways to visualise these results, with a few examples given below.
+- How do you think this information would be best displayed? **This is what we're going to do over the next few days.**
+
+# Visualising the results as a barplot  
+
+```{r}
+
+source("./R/gen_gprofiler_barplot.R")
+
+gen_gprofiler_barplot(DF = gprofilerOutput$result, 
+                      num_categories = 10,
+                      plot_title = "")
+
+```
+
+# Visualising the results with gprofiler's in-built visualisation
+
+```{r}
+
+gprofiler2::gostplot(gprofilerOutput)
+
+```
+
+# Visualising as a network?
+- Nodes would represent GO terms and edges the genes shared between these GO terms
+- Potential packages:
+    - [ggraph](https://github.com/thomasp85/ggraph)
+    - [ggnetwork](https://github.com/briatte/ggnetwork)
+    - [geom_net](https://github.com/sctyner/geomnet)
+
+# Session info
+- It is considered good practice to always your session info in the html output of an R markdown.
+- Session info will depend on the RStudio you are using, your operating system and the packages you load. Thus, when you knit the final product of your code, it may not look like it does in this version of the html output. 
+```{r session info}
+
+sessionInfo()
+
+```
 

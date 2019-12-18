@@ -23,6 +23,7 @@ knitr::opts_chunk$set(echo = T, warning = F, message= F)
 
 ```{r}
 
+library(ggpubr)
 library(gprofiler2)
 library(tidyverse)
 library(readxl)
@@ -41,22 +42,38 @@ getwd()
 
 # Running gProfiler2
 - Input genes are sourced from the latest [PD GWAS](https://www.biorxiv.org/content/10.1101/388165v3).
+- We will be using two lists:
+    - Nearest nominated gene
+    - QTL nominated gene
 ```{r}
 
-# import PD GWAS gene list
-geneList <- 
-  readxl::read_excel(path = "./data/TableS2_Detailed_summary_statistics_nominated_risk_variants.xlsx") %>% 
-  # Extract "Nearest Gene" column as vector
-  .[["Nearest Gene"]] %>% 
-  # Remove NAs
-  na.omit() %>%
-  # Convert to character vector
-  as.character() %>% 
-  # Keep only unique genes
-  unique()
+# import PD GWAS table
+PD_res <-
+  readxl::read_excel(path = "./data/TableS2_Detailed_summary_statistics_nominated_risk_variants.xlsx")
+
+# Creating a named list
+geneLists <- 
+  PD_res %>% 
+  # Select two columns we wish to turn into lists
+  dplyr::select(`Nearest Gene`, `QTL Nominated Gene (nearest QTL)`) %>% 
+  # Coerce columns into list format
+  as.list() %>% 
+  # Across each list do the following...
+  lapply(., function(x){
+    x %>% 
+      # Remove NAs
+      na.omit() %>%
+      # Convert to character vector
+      as.character() %>% 
+      # Keep only unique genes
+      unique()
+  }) %>% 
+  # Name the lists
+  setNames(., c("nearest_gene", "QTL_nom_gene"))
+
 
 # running gprofiler
-gprofilerOutput <- gprofiler2::gost(geneList, 
+gprofilerOutput <- gprofiler2::gost(query = geneLists, # if lists are named then gost can use this an input
                                organism = "hsapiens", # set the organism 
                                correction_method = c("gSCS"), # select a correction method (gSCS reccomended in gost documentation)
                                domain_scope = c("annotated"), # select whether to restrict the background set
@@ -77,28 +94,58 @@ gprofilerOutput$result %>%
   DT::datatable(rownames = FALSE,
                 options = list(scrollX = TRUE),
                 class = 'white-space: nowrap')
-  
 
 ```
 
+- Notice that one of the columns is `query`, and within this we find the names of our inputted lists i.e. `r gprofilerOutput$result %>% .[["query"]] %>% unique()`
 - gprofiler outputs a number of columns, a few of which are not entirely self-explanatory, including:
     - precision: this is the proportion of genes in the input gene list that can be assigned this term i.e. overlap.size/query.size
     - recall: this is the proportion of genes in the input list that overlap with the term i.e. overlap.size/term.size
     - parents: GO terms belong to families of terms. This column will provide the parent terms to the GO term found enriched.
+- Also, as some of you may notice there are some duplicated terms between our two lists, which are shown in the table below.
+```{r}
+
+gprofilerOutput$result %>% 
+  # Filter for duplicated terms
+  dplyr::filter(duplicated(term_id) | duplicated(term_id, fromLast = TRUE)) %>% 
+  # Rearrange column order to have term_id and term_name at beginning
+  dplyr::select(term_id,term_name, everything()) %>% 
+  # Arrange rows by term_id
+  dplyr::arrange(term_id) %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(scrollX = TRUE),
+                class = 'white-space: nowrap')
+
+```
 
 # How to visualise this information?
 - There are many ways to visualise these results, with a few examples given below.
 - How do you think this information would be best displayed? **This is what we're going to do over the next few days.**
 
 # Visualising the results as a barplot  
-
-```{r}
+- Remember we queried two lists, so we will want to plot this twice
+```{r, fig.height=8}
 
 source("./R/gen_gprofiler_barplot.R")
 
-gen_gprofiler_barplot(DF = gprofilerOutput$result, 
-                      num_categories = 10,
-                      plot_title = "")
+plot_list <- 
+  gprofilerOutput$result %>% 
+  # Group by query
+  dplyr::group_by(query) %>% 
+  # Split dataframe by query groups i.e. nearest_gene and QTL_nom_gene
+  dplyr::group_split() %>%
+  # For each dataframe plot a barplot
+  lapply(., function(x){
+    gen_gprofiler_barplot(DF = x,
+                          num_categories = 15,
+                          plot_title = "")
+  })
+
+# ggarrange allows us to arrange multiple ggplots on the same page
+ggpubr::ggarrange(plotlist = plot_list,
+                  labels = c("nearest_gene", "QTL_nom_gene"),
+                  nrow = 2)  
+
 
 ```
 
@@ -106,7 +153,7 @@ gen_gprofiler_barplot(DF = gprofilerOutput$result,
 
 ```{r}
 
-gprofiler2::gostplot(gprofilerOutput)
+gprofiler2::gostplot(gprofilerOutput) 
 
 ```
 

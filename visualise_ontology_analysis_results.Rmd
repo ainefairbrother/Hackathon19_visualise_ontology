@@ -79,8 +79,10 @@ gprofilerOutput <- gprofiler2::gost(query = geneLists, # if lists are named then
                                domain_scope = c("annotated"), # select whether to restrict the background set
                                sources = c("GO"), # databases would you like to search for pathways & processes (others: "KEGG","REAC","WP")
                                significant = TRUE, # when TRUE displays only significant results (p<0.05)
-                               evcodes = FALSE, # when TRUE displays the IDs of the genes calling each pathway
+                               evcodes = TRUE, # when TRUE displays the IDs of the genes calling each pathway
                                ordered_query = FALSE) # when TRUE the input list is ordered in some meaningful way
+
+
 
 ```
 
@@ -163,6 +165,184 @@ gprofiler2::gostplot(gprofilerOutput)
     - [ggraph](https://github.com/thomasp85/ggraph)
     - [ggnetwork](https://github.com/briatte/ggnetwork)
     - [geom_net](https://github.com/sctyner/geomnet)
+    
+# Visualise as circular plot
+
+## First attempt
+![](crap_plot_0.png)
+
+## Starting the circle
+```{r, fig.height=9, fig.width=9}
+
+# Save results with a column denoting an x-value between the range 1-2
+results <- gprofilerOutput$result %>% 
+  dplyr::mutate(x = 1.5)
+
+# Need to create a duplicate table wherein a range (xmin, xmax) is created for each term
+results_dup <- results %>% 
+  dplyr::select(-x) %>% 
+  dplyr::inner_join(results %>% 
+                      dplyr::distinct(term_id) %>% 
+                      dplyr::mutate(xmin = 1,
+                                    xmax = 2) %>% 
+                      tidyr::gather(key = x_value, value = x, -term_id) %>% 
+                      dplyr::select(-x_value))
+
+
+# Initialising first circle with points
+library(circlize)
+circos.par("track.height" = 0.1)
+circos.initialize(factors = results_dup$term_id, x = results_dup$x)
+
+circos.track(factors = results$term_id, x = results$x, y = results$precision,
+             panel.fun = function(x, y) {
+               circos.points(x,y)
+             })
+
+# Adding text to circle
+library(circlize)
+circos.par("track.height" = 0.1)
+circos.initialize(factors = results_dup$term_id, x = results_dup$x)
+
+circos.track(factors = results$term_id, x = results$x, y = results$precision,
+             panel.fun = function(x, y) {
+               circos.points(x,y)
+               labels = get.cell.meta.data("sector.index")
+               xlim = get.cell.meta.data("xlim")
+               ylim = get.cell.meta.data("ylim")
+               circos.text(x = mean(xlim), y = 0.9, 
+                           labels = labels, 
+                           cex = 0.5, 
+                           facing = "clockwise", 
+                           niceFacing = TRUE)
+             })
+
+# Moving text in circle
+library(circlize)
+circos.par("track.height" = 0.1)
+circos.initialize(factors = results_dup$term_id, x = results_dup$x)
+
+circos.track(factors = results$term_id, x = results$x, y = results$precision,
+             panel.fun = function(x, y) {
+               circos.points(x,y)
+               labels = get.cell.meta.data("sector.index")
+               xlim = get.cell.meta.data("xlim")
+               ylim = get.cell.meta.data("ylim")
+               circos.text(x = mean(xlim), y = 2, 
+                           labels = labels, 
+                           cex = 0.75, 
+                           facing = "clockwise", 
+                           niceFacing = TRUE)
+             })
+
+
+
+```
+
+
+## Chord diagram
+- We decided to start from the `chordDiagram()` function as opposed to building our own tracks from scratch
+- This required creating:
+    - A function to find the genes that intersect between GO enrichments
+    - A function to plot the chordDiagram and add a rotated text track
+```{r}
+
+get_intersections <- function(gprofiler_results, term_id_or_name = c("id", "name")){
+  
+  if(term_id_or_name == "id"){
+    
+    intersect_df <- data.frame(term_id_1 = gprofiler_results$term_id %>% unique() %>% as.character(),
+                               term_id_2 = gprofiler_results$term_id %>% unique() %>% as.character()) %>% 
+      tidyr::expand(term_id_1, term_id_2) %>%  
+      dplyr::mutate(term_id_1 = term_id_1 %>% as.character(),
+                    term_id_2 = term_id_2 %>% as.character()) %>% 
+      dplyr::filter(term_id_1 < term_id_2) %>% 
+      dplyr::inner_join(gprofiler_results %>% 
+                          dplyr::select(term_id, intersection), by = c("term_id_1" = "term_id")) %>% 
+      dplyr::inner_join(gprofiler_results %>% 
+                          dplyr::select(term_id, intersection), by = c("term_id_2" = "term_id")) %>% 
+      dplyr::mutate(intersection.x = intersection.x %>% 
+                      str_split(., ","),
+                    intersection.y = intersection.y %>% 
+                      str_split(., ","),
+                    intersection_of_x_and_y = Map(intersect, intersection.x, intersection.y),
+                    number_of_intersections = Map(length, intersection_of_x_and_y) %>% 
+                      unlist()) %>% 
+      dplyr::distinct(term_id_1, term_id_2, .keep_all = TRUE) %>% 
+      dplyr::mutate(from = term_id_1,
+                    to = term_id_2,
+                    value = as.numeric(number_of_intersections)) %>% 
+      dplyr::select(from,to,value)
+    
+  } 
+  
+  if(term_id_or_name == "name"){
+    
+    intersect_df <- data.frame(term_name_1 = gprofiler_results$term_name %>% unique() %>% as.character(),
+                               term_name_2 = gprofiler_results$term_name %>% unique() %>% as.character()) %>% 
+      tidyr::expand(term_name_1, term_name_2) %>%  
+      dplyr::mutate(term_name_1 = term_name_1 %>% as.character(),
+                    term_name_2 = term_name_2 %>% as.character()) %>% 
+      dplyr::filter(term_name_1 < term_name_2) %>% 
+      dplyr::inner_join(gprofiler_results %>% 
+                          dplyr::select(term_name, intersection), by = c("term_name_1" = "term_name")) %>% 
+      dplyr::inner_join(gprofiler_results %>% 
+                          dplyr::select(term_name, intersection), by = c("term_name_2" = "term_name")) %>% 
+      dplyr::mutate(intersection.x = intersection.x %>% 
+                      str_split(., ","),
+                    intersection.y = intersection.y %>% 
+                      str_split(., ","),
+                    intersection_of_x_and_y = Map(intersect, intersection.x, intersection.y),
+                    number_of_intersections = Map(length, intersection_of_x_and_y) %>% 
+                      unlist()) %>% 
+      dplyr::distinct(term_name_1, term_name_2, .keep_all = TRUE) %>% 
+      dplyr::mutate(from = term_name_1,
+                    to = term_name_2,
+                    value = as.numeric(number_of_intersections)) %>% 
+      dplyr::select(from,to,value)
+    
+  }
+  
+  return(as.data.frame(intersect_df))
+  
+}
+
+chord_diagram_function <- function(chord_results){
+  mat <- chord_results %>% 
+    dplyr::mutate(from = str_wrap(from, width = 20),
+                to = str_wrap(to, width = 20))
+  
+  set.seed(1234)
+  grid.col <- setNames(rainbow(length(unlist(dimnames(mat)))), union(rownames(mat), colnames(mat)))
+  par(mar = c(0, 0, 0, 0), mfrow = c(1, 1))
+  
+  
+  # now, the image with rotated labels
+  chordDiagram(mat, annotationTrack = "grid", preAllocateTracks = 1, grid.col = grid.col)
+  circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
+    xlim = get.cell.meta.data("xlim")
+    ylim = get.cell.meta.data("ylim")
+    sector.name = get.cell.meta.data("sector.index")
+    circos.text(mean(xlim), ylim[1] + .1, cex = 0.75, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5))
+    circos.axis(h = "top", labels.cex = 0.5, major.tick.percentage = 0.2, sector.index = sector.name, track.index = 2)
+  }, bg.border = NA)
+}
+
+```
+
+- We can now plot our diagram.
+```{r, fig.height= 12, fig.width=12}
+
+chord_results <- get_intersections(gprofiler_results = gprofilerOutput$result %>% 
+                                     dplyr::filter(query == "QTL_nom_gene",
+                                                   term_size > 20,
+                                                   term_size < 2000), 
+                                   term_id_or_name = "name") 
+
+chord_diagram_function(chord_results = chord_results %>% 
+                         dplyr::filter(value > 10))
+
+```
 
 # Session info
 - It is considered good practice to always your session info in the html output of an R markdown.
